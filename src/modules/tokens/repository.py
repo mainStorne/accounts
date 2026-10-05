@@ -65,17 +65,19 @@ class TokenRepository:
         return access_token
 
     @classmethod
-    def create_user_access_token(cls, user: User) -> str:
+    def create_user_access_token(cls, user: User, impersonated: bool = False) -> str:
         """
         Generate access token for current user with user id in `uid` field, expires in 1 day. Also will contain email, telegram_id if they are present.
         """
         data = TokenRepository._generate_user_payload(user)
+        if impersonated:
+            data["impersonated"] = True
         access_token = TokenRepository._create_token(data=data, expires_delta=timedelta(days=1), scopes=["me"])
         return access_token
 
     @classmethod
     def create_impersonation_token(cls, uid: str, email: str) -> str:
-        data = {"uid": uid, "email": email}
+        data = {"uid": uid, "email": email, "impersonated": True}
         return TokenRepository._create_token(data=data, expires_delta=timedelta(days=1), scopes=["me"])
 
     @classmethod

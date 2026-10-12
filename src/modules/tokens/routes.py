@@ -13,7 +13,7 @@ from fastapi import APIRouter, Query, Request, Security
 from pydantic import BaseModel
 
 from src.api import docs
-from src.api.dependencies import IMPERSONATE_MAX_AGE_SEC, AdminDep, UserDep, is_impersonating
+from src.api.dependencies import IMPERSONATE_MAX_AGE_SEC, AdminDep, UserDep
 from src.exceptions import InvalidScope, NotEnoughPermissionsException, ObjectNotFound, UserWithoutSessionException
 from src.modules.tokens.dependencies import verify_access_token
 from src.modules.tokens.expiration import ServiceTokenExpiration
@@ -40,12 +40,11 @@ async def get_jwks():
     "/tokens/generate-my-token",
     responses={200: {"description": "Token"}, **UserWithoutSessionException.responses},
 )
-async def generate_my_token(user: UserDep, request: Request) -> TokenData:
+async def generate_my_token(user: UserDep) -> TokenData:
     """
-    Generate access token for current user with user id in `uid` field and other info if present, expires in 1 day.
-    Works with the session cookie or with a valid 'my token' in the Authorization header (to renew it).
+    Generate access token for current user with user id in `uid` field and other info if present, expires in 1 day
     """
-    token = TokenRepository.create_user_access_token(user, impersonated=is_impersonating(request))
+    token = TokenRepository.create_user_access_token(user)
     return TokenData(access_token=token)
 
 

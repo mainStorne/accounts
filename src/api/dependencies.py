@@ -5,12 +5,8 @@ from typing import Annotated
 
 from beanie import PydanticObjectId
 from fastapi import Depends, Request
-from joserfc import jwt
-from joserfc.errors import JoseError
-from joserfc.jwt import JWTClaimsRegistry
 
 from src.exceptions import NotEnoughPermissionsException, UserWithoutSessionException
-from src.modules.tokens.repository import TokenRepository
 from src.modules.users.repository import user_repository
 from src.storages.mongo.models import User
 
@@ -29,27 +25,6 @@ def is_impersonating(request: Request) -> bool:
     return bool(request.session.get("impersonate_uid") and impersonate_until and time.time() < impersonate_until)
 
 
-def _get_uid_from_my_token(request: Request) -> str | None:
-    """
-    Get uid from 'my token' (scope `me`) in the Authorization header. It lets the frontend use the API without
-    the session cookie, e.g. through a mirror host on another domain, where the browser doesn't send the cookie.
-    Impersonation tokens are skipped, so they can't be renewed via /tokens/generate-my-token past the impersonation.
-    """
-    scheme, _, token = request.headers.get("Authorization", "").partition(" ")
-    if scheme.lower() != "bearer" or not token:
-        return None
-    try:
-        claims = jwt.decode(token, TokenRepository.public_jwt_key).claims
-        JWTClaimsRegistry().validate(claims)
-    except JoseError:
-        return None
-    scope_string = claims.get("scope", None)
-    scopes = scope_string.split() if scope_string else []
-    if "me" not in scopes or claims.get("aud") or claims.get("impersonated"):
-        return None
-    return claims.get("uid")
-
-
 async def _get_optional_uid_from_session(request: Request) -> PydanticObjectId | None:
     if is_impersonating(request):
         impersonate_uid = request.session.get("impersonate_uid")
@@ -62,7 +37,7 @@ async def _get_optional_uid_from_session(request: Request) -> PydanticObjectId |
         request.session.pop("impersonate_uid", None)
         request.session.pop("impersonate_until", None)
 
-    uid = request.session.get("uid") or _get_uid_from_my_token(request)
+    uid = request.session.get("uid")
     if uid is None:
         return None
     uid = PydanticObjectId(uid)

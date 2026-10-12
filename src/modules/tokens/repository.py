@@ -4,7 +4,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from joserfc import jwt
+from joserfc.errors import JoseError
 from joserfc.jwk import RSAKey
+from joserfc.jwt import JWTClaimsRegistry
 
 from src.config import settings
 from src.modules.tokens.expiration import ServiceTokenExpiration, resolve_service_token_expiration
@@ -13,6 +15,7 @@ from src.storages.mongo.models import User
 
 class TokenRepository:
     ALGORITHM = "RS256"
+    MIRROR_TRANSFER_AUD = "mirror-session"
     private_jwt_key = RSAKey.import_key(settings.auth.jwt_private_key.get_secret_value())
     public_jwt_key = RSAKey.import_key(settings.auth.jwt_public_key)
 
@@ -65,19 +68,17 @@ class TokenRepository:
         return access_token
 
     @classmethod
-    def create_user_access_token(cls, user: User, impersonated: bool = False) -> str:
+    def create_user_access_token(cls, user: User) -> str:
         """
         Generate access token for current user with user id in `uid` field, expires in 1 day. Also will contain email, telegram_id if they are present.
         """
         data = TokenRepository._generate_user_payload(user)
-        if impersonated:
-            data["impersonated"] = True
         access_token = TokenRepository._create_token(data=data, expires_delta=timedelta(days=1), scopes=["me"])
         return access_token
 
     @classmethod
     def create_impersonation_token(cls, uid: str, email: str) -> str:
-        data = {"uid": uid, "email": email, "impersonated": True}
+        data = {"uid": uid, "email": email}
         return TokenRepository._create_token(data=data, expires_delta=timedelta(days=1), scopes=["me"])
 
     @classmethod
@@ -91,6 +92,30 @@ class TokenRepository:
         data = {"room_id": room_id}
         access_token = TokenRepository._create_token(data=data, expires_delta=timedelta(days=3650), aud="room-booking")
         return access_token
+
+    @classmethod
+    def create_mirror_transfer_token(cls, user: User) -> str:
+        """
+        Generate token to set the session of the user on a mirror host, expires in 1 minute.
+        Has its own audience, so it is not accepted as an access token, and an access token is not accepted instead.
+        """
+        data = {"uid": str(user.id)}
+        return TokenRepository._create_token(data=data, expires_delta=timedelta(minutes=1), aud=cls.MIRROR_TRANSFER_AUD)
+
+    @classmethod
+    def verify_mirror_transfer_token(cls, token: str) -> str | None:
+        """
+        Get uid from a mirror transfer token, or None if the token is invalid or expired.
+        """
+        try:
+            claims = jwt.decode(token, cls.public_jwt_key).claims
+            JWTClaimsRegistry(
+                exp={"essential": True},
+                aud={"essential": True, "value": cls.MIRROR_TRANSFER_AUD},
+            ).validate(claims)
+        except JoseError:
+            return None
+        return claims.get("uid")
 
     @classmethod
     def get_jwks(cls) -> dict:
